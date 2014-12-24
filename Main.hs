@@ -1,13 +1,66 @@
+import Control.Applicative
+import Control.Arrow
+import Control.Monad.State
 import System.Environment
-import Language.SQL.SimpleSQL.Parser
-import Language.SQL.SimpleSQL.Pretty
+import Language.SQL.SimpleSQL.Syntax
+import Language.SQL.SimpleSQL.Parser (parseQueryExpr)
+import Language.SQL.SimpleSQL.Pretty (prettyQueryExpr)
 
-parseSql = parseQueryExpr "" Nothing
+data TableMap = TableMap { stateTs :: [(String,FilePath)], stateI :: Int }
+    deriving (Show)
+
+emptyTableMap = TableMap [] 0
+
+conv :: QueryExpr -> State TableMap QueryExpr
+conv sql@(Select _ _ _ _ _ _ _ _ _)  = do
+    qeFrom' <- forM (qeFrom sql) convTRef
+    return sql { qeFrom = qeFrom' }
+
+conv sql = return sql -- FIXME
+
+convTRef :: TableRef -> State TableMap TableRef
+convTRef (TRSimple names) = TRSimple <$> forM names convName
+convTRef (TRJoin tref1 nat jtype tref2 mJoinCond) = do
+    tref1' <- convTRef tref1
+    tref2' <- convTRef tref2
+    return $ TRJoin tref1' nat jtype tref2' mJoinCond
+convTRef (TRParens tref) = TRParens <$> convTRef tref
+convTRef (TRAlias tref alias) = do
+    tref' <- convTRef tref
+    return $ TRAlias tref' alias
+convTRef (TRQueryExpr expr) = TRQueryExpr <$> conv expr
+convTRef (TRFunction names vexprs) = do
+    names' <- forM names convName
+    vexprs' <- forM vexprs convVExpr
+    return $ TRFunction names' vexprs'
+convTRef (TRLateral tref) = TRLateral <$> convTRef tref
+
+convName sqlName = do
+    let name = case sqlName of
+            Name s -> s
+            QName s -> s
+            UQName s -> s
+    n <- registerTable name
+    return $ Name n
+
+convVExpr vexpr = return vexpr
+
+registerTable fpath = do
+    TableMap ts i <- get
+    let tname = "t" ++ show i
+    put $ TableMap ((tname, fpath):ts) (i+1)
+    return tname
 
 main :: IO ()
 main = do
     args <- getArgs
-    let esql = parseSql $ args !! 0
+    let esql = parseSql (args !! 0)
     case esql of
          Left e -> putStrLn $ "Error: " ++ show e
-         Right sql -> putStrLn $ prettyQueryExpr sql
+         Right sql -> do
+             let state = prettyQueryExpr <$> conv sql
+             let (expr, map) = runState state emptyTableMap
+             putStrLn $ "State: " ++ show map
+             putStrLn $ "SQL: " ++ show expr
+
+parseSql = left show . parseQueryExpr "" Nothing
