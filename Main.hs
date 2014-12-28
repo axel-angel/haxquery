@@ -7,7 +7,7 @@ import Language.SQL.SimpleSQL.Syntax
 import Language.SQL.SimpleSQL.Parser (parseQueryExpr)
 import Language.SQL.SimpleSQL.Pretty (prettyQueryExpr)
 
-data TableMap = TableMap { stateTs :: [(String,FilePath)], stateI :: Int }
+data TableMap = TableMap { stateTs :: [(FilePath,String)], stateI :: Int }
     deriving (Show)
 
 emptyTableMap :: TableMap
@@ -66,9 +66,13 @@ convVExpr vexpr = return vexpr
 registerTable :: MonadState TableMap m => FilePath -> m String
 registerTable fpath = do
     TableMap ts i <- get
-    let tname = "t" ++ show i
-    put $ TableMap ((tname, fpath):ts) (i+1)
-    return tname
+    case lookup fpath ts of
+         Just tname ->
+             return tname
+         Nothing -> do
+            let tname = "t" ++ show i
+            put $ TableMap ((fpath, tname):ts) (i+1)
+            return tname
 
 main :: IO ()
 main = do
