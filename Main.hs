@@ -1,3 +1,4 @@
+{-# LANGUAGE TupleSections, FlexibleContexts #-}
 import Control.Applicative
 import Control.Arrow
 import Control.Monad.State
@@ -16,7 +17,19 @@ conv sql@(Select _ _ _ _ _ _ _ _ _)  = do
     qeFrom' <- forM (qeFrom sql) convTRef
     return sql { qeFrom = qeFrom' }
 
-conv sql = return sql -- FIXME
+conv sql@(CombineQueryExpr _ _ _ _ _) = do
+    qe0' <- conv $ qe0 sql
+    qe1' <- conv $ qe1 sql
+    return sql { qe0 = qe0', qe1 = qe1' }
+
+conv sql@(With _ _ _) = do
+    qeViews' <- forM (qeViews sql) $ \(al, qe) -> (al,) <$> conv qe
+    qeQueryExpression' <- conv $ qeQueryExpression sql
+    return sql { qeViews = qeViews', qeQueryExpression = qeQueryExpression' }
+
+conv sql@(Values _) = return sql
+
+conv sql@(Table _) = return sql
 
 convTRef :: TableRef -> State TableMap TableRef
 convTRef (TRSimple names) = TRSimple <$> forM names convName
