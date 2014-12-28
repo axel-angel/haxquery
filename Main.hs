@@ -13,6 +13,26 @@ data TableMap = TableMap { stateTs :: [(FilePath,String)], stateI :: Int }
 emptyTableMap :: TableMap
 emptyTableMap = TableMap [] 0
 
+
+main :: IO ()
+main = do
+    args <- getArgs
+    let esql = parseSql (args !! 0)
+    case esql of
+         Left e -> putStrLn $ "Error: " ++ show e
+         Right sql -> do
+             let tstate = prettyQueryExpr <$> conv sql
+             let (expr, tmap) = runState tstate emptyTableMap
+             putStrLn $ "State: " ++ show tmap
+             putStrLn $ "SQL: " ++ show expr
+
+
+parseSql :: String -> Either String QueryExpr
+parseSql = left show . parseQueryExpr "" Nothing
+
+
+{-- Find and register file-table in query --}
+
 conv :: QueryExpr -> State TableMap QueryExpr
 conv sql@(Select _ _ _ _ _ _ _ _ _)  = do
     qeFrom' <- forM (qeFrom sql) convTRef
@@ -31,6 +51,7 @@ conv sql@(With _ _ _) = do
 conv sql@(Values _) = return sql
 
 conv sql@(Table _) = return sql
+
 
 convTRef :: TableRef -> State TableMap TableRef
 convTRef (TRSimple names) = TRSimple <$> forM names convName
@@ -73,18 +94,3 @@ registerTable fpath = do
             let tname = "t" ++ show i
             put $ TableMap ((fpath, tname):ts) (i+1)
             return tname
-
-main :: IO ()
-main = do
-    args <- getArgs
-    let esql = parseSql (args !! 0)
-    case esql of
-         Left e -> putStrLn $ "Error: " ++ show e
-         Right sql -> do
-             let tstate = prettyQueryExpr <$> conv sql
-             let (expr, tmap) = runState tstate emptyTableMap
-             putStrLn $ "State: " ++ show tmap
-             putStrLn $ "SQL: " ++ show expr
-
-parseSql :: String -> Either String QueryExpr
-parseSql = left show . parseQueryExpr "" Nothing
