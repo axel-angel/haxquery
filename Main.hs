@@ -10,6 +10,7 @@ import Language.SQL.SimpleSQL.Pretty (prettyQueryExpr)
 data TableMap = TableMap { stateTs :: [(String,FilePath)], stateI :: Int }
     deriving (Show)
 
+emptyTableMap :: TableMap
 emptyTableMap = TableMap [] 0
 
 conv :: QueryExpr -> State TableMap QueryExpr
@@ -48,6 +49,8 @@ convTRef (TRFunction names vexprs) = do
     return $ TRFunction names' vexprs'
 convTRef (TRLateral tref) = TRLateral <$> convTRef tref
 
+
+convName :: MonadState TableMap m => Name -> m Name
 convName sqlName = do
     let name = case sqlName of
             Name s -> s
@@ -56,8 +59,11 @@ convName sqlName = do
     n <- registerTable name
     return $ Name n
 
+convVExpr :: Monad m => a -> m a
 convVExpr vexpr = return vexpr
 
+
+registerTable :: MonadState TableMap m => FilePath -> m String
 registerTable fpath = do
     TableMap ts i <- get
     let tname = "t" ++ show i
@@ -71,9 +77,10 @@ main = do
     case esql of
          Left e -> putStrLn $ "Error: " ++ show e
          Right sql -> do
-             let state = prettyQueryExpr <$> conv sql
-             let (expr, map) = runState state emptyTableMap
-             putStrLn $ "State: " ++ show map
+             let tstate = prettyQueryExpr <$> conv sql
+             let (expr, tmap) = runState tstate emptyTableMap
+             putStrLn $ "State: " ++ show tmap
              putStrLn $ "SQL: " ++ show expr
 
+parseSql :: String -> Either String QueryExpr
 parseSql = left show . parseQueryExpr "" Nothing
