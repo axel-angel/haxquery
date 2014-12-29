@@ -8,7 +8,7 @@ import Language.SQL.SimpleSQL.Parser (parseQueryExpr)
 import Language.SQL.SimpleSQL.Pretty (prettyQueryExpr)
 import qualified Database.SQLite.Simple as SQL
 import Text.Regex (mkRegex, splitRegex, Regex)
-import Data.Text (pack)
+import Data.Text (pack, unpack, Text)
 import Data.List (intercalate)
 
 data TableMap = TableMap { stateTs :: [(FilePath,String)], stateI :: Int }
@@ -35,7 +35,10 @@ runSql sql conn = do
     loadFiles conn tmap
 
     putStrLn $ "State: " ++ show tmap
-    putStrLn $ "SQL: " ++ show expr
+    putStrLn $ "SQL: " ++ expr
+
+    rs <- SQL.query_ conn (SQL.Query $ pack expr) :: IO [[Text]]
+    forM_ rs (putStrLn . show)
 
 
 {-- Parse files to fill content-equivalent tables --}
