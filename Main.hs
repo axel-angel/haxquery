@@ -55,14 +55,14 @@ fillLines :: SQL.Connection -> String -> Int -> String -> IO Int
 fillLines conn tname cols line = do
     let fields = splitRegex rxSplit line
     -- add more columns when needed
-    forM_ [cols + 1..length fields - 1] $ \i -> do
+    forM_ [cols..length fields - 1] $ \i -> do
         addColumn conn tname ("c" ++ show i)
     -- fill the table
     let vstr = intercalate "," $ ("NULL" : map (const "?") fields)
     let q = "INSERT INTO "++ tname ++" VALUES ("++ vstr ++")"
     SQL.execute conn (SQL.Query $ pack $ q) $ fields
     -- keep track of the number of columns so far
-    return $ length fields - 1
+    return $ length fields
 
 
 rxSplit :: Regex
