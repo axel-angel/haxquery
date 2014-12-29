@@ -37,8 +37,8 @@ runSql sql conn = do
     putStrLn $ "State: " ++ show tmap
     putStrLn $ "SQL: " ++ expr
 
-    rs <- SQL.query_ conn (SQL.Query $ pack expr) :: IO [[Text]]
-    forM_ rs $ putStrLn . intercalate "\t" . map unpack
+    rs <- SQL.query_ conn (SQL.Query $ pack expr) :: IO [[String]]
+    forM_ rs $ putStrLn . intercalate "\t"
 
 
 {-- Parse files to fill content-equivalent tables --}
