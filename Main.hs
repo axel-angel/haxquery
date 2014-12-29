@@ -60,7 +60,7 @@ fillLines conn tname cols line = do
     -- fill the table
     let vstr = intercalate "," $ ("NULL" : map (const "?") fields)
     let q = "INSERT INTO "++ tname ++" VALUES ("++ vstr ++")"
-    SQL.execute conn (SQL.Query $ pack $ q) $ fields
+    SQL.execute conn (SQL.Query $ pack q) $ fields
     -- keep track of the number of columns so far
     return $ length fields
 
@@ -72,12 +72,12 @@ rxSplit = mkRegex "\t|  +"
 createTable :: SQL.Connection -> String -> IO ()
 createTable conn tname = do
     let q = "CREATE TABLE "++ tname ++" (id INTEGER PRIMARY KEY)"
-    SQL.execute_ conn (SQL.Query $ pack $ q)
+    SQL.execute_ conn (SQL.Query $ pack q)
 
 addColumn :: SQL.Connection -> String -> String -> IO ()
 addColumn conn tname cname = do
     let q = "ALTER TABLE "++ tname ++" ADD COLUMN "++ cname ++" STRING"
-    SQL.execute_ conn (SQL.Query $ pack $ q)
+    SQL.execute_ conn (SQL.Query $ pack q)
 
 {-- Find and register file-table in query --}
 
