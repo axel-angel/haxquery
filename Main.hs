@@ -6,6 +6,10 @@ import System.Environment
 import Language.SQL.SimpleSQL.Syntax
 import Language.SQL.SimpleSQL.Parser (parseQueryExpr)
 import Language.SQL.SimpleSQL.Pretty (prettyQueryExpr)
+import qualified Database.SQLite.Simple as SQL
+import Text.Regex (mkRegex, splitRegex, Regex)
+import Data.Text (pack)
+import Data.List (intercalate)
 
 data TableMap = TableMap { stateTs :: [(FilePath,String)], stateI :: Int }
     deriving (Show)
@@ -20,16 +24,60 @@ main = do
     let esql = parseSql (args !! 0)
     case esql of
          Left e -> putStrLn $ "Error: " ++ show e
-         Right sql -> do
-             let tstate = prettyQueryExpr <$> conv sql
-             let (expr, tmap) = runState tstate emptyTableMap
-             putStrLn $ "State: " ++ show tmap
-             putStrLn $ "SQL: " ++ show expr
+         Right sql -> SQL.withConnection ":memory:" $ runSql sql
 
 
-parseSql :: String -> Either String QueryExpr
-parseSql = left show . parseQueryExpr "" Nothing
+runSql :: QueryExpr -> SQL.Connection -> IO ()
+runSql sql conn = do
+    let tstate = prettyQueryExpr <$> conv sql
+    let (expr, tmap) = runState tstate emptyTableMap
 
+    loadFiles conn tmap
+
+    putStrLn $ "State: " ++ show tmap
+    putStrLn $ "SQL: " ++ show expr
+
+
+{-- Parse files to fill content-equivalent tables --}
+
+loadFiles :: SQL.Connection -> TableMap -> IO ()
+loadFiles conn tmap = forM_ (stateTs tmap) $ \(fpath, tname) -> do
+    -- create the table
+    createTable conn tname
+    -- open file, read line by line
+    content <- readFile fpath
+    -- split using regex
+    -- TODO: detect from extension: csv, etc
+    foldM_ (fillLines conn tname) 0 $ lines content
+
+
+fillLines :: SQL.Connection -> String -> Int -> String -> IO Int
+fillLines conn tname cols line = do
+    let fields = splitRegex rxSplit line
+    -- add more columns when needed
+    forM_ [cols + 1..length fields - 1] $ \i -> do
+        addColumn conn tname ("c" ++ show i)
+    -- fill the table
+    let vstr = intercalate "," $ ("NULL" : map (const "?") fields)
+    let q = "INSERT INTO "++ tname ++" VALUES ("++ vstr ++")"
+    SQL.execute conn (SQL.Query $ pack $ q) $ fields
+    -- keep track of the number of columns so far
+    return $ length fields - 1
+
+
+rxSplit :: Regex
+rxSplit = mkRegex "\t|  +"
+
+
+createTable :: SQL.Connection -> String -> IO ()
+createTable conn tname = do
+    let q = "CREATE TABLE "++ tname ++" (id INTEGER PRIMARY KEY)"
+    SQL.execute_ conn (SQL.Query $ pack $ q)
+
+addColumn :: SQL.Connection -> String -> String -> IO ()
+addColumn conn tname cname = do
+    let q = "ALTER TABLE "++ tname ++" ADD COLUMN "++ cname ++" STRING"
+    SQL.execute_ conn (SQL.Query $ pack $ q)
 
 {-- Find and register file-table in query --}
 
@@ -94,3 +142,9 @@ registerTable fpath = do
             let tname = "t" ++ show i
             put $ TableMap ((fpath, tname):ts) (i+1)
             return tname
+
+
+{-- Others/utilities --}
+
+parseSql :: String -> Either String QueryExpr
+parseSql = left show . parseQueryExpr "" Nothing

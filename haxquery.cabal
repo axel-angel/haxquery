@@ -23,6 +23,8 @@ executable haxquery
                      , sqlite-simple >= 0.4.8.0
                      , simple-sql-parser >= 0.4.0
                      , mtl >= 2.0.0
+                     , regex-compat >= 0.92
+                     , text >= 1.2.0.0
   -- hs-source-dirs:
   default-language:    Haskell2010
   GHC-Options:    -Wall
