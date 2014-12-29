@@ -49,19 +49,20 @@ loadFiles conn tmap = forM_ (stateTs tmap) $ \(fpath, tname) -> do
     createTable conn tname
     -- open file, read line by line
     content <- readFile fpath
-    -- split using regex
     -- TODO: detect from extension: csv, etc
-    foldM_ (fillLines conn tname) 0 $ lines content
+    -- fill the table (has already one column!)
+    foldM_ (fillLines conn tname) 1 $ lines content
 
 
 fillLines :: SQL.Connection -> String -> Int -> String -> IO Int
 fillLines conn tname cols line = do
+    -- split using regex
     let fields = splitRegex rxSplit line
     -- add more columns when needed
     forM_ [cols..length fields - 1] $ \i -> do
         addColumn conn tname ("c" ++ show i)
     -- fill the table
-    let vstr = intercalate "," $ ("NULL" : map (const "?") fields)
+    let vstr = intercalate "," $ map (const "?") fields
     let q = "INSERT INTO "++ tname ++" VALUES ("++ vstr ++")"
     SQL.execute conn (SQL.Query $ pack q) $ fields
     -- keep track of the number of columns so far
@@ -74,7 +75,8 @@ rxSplit = mkRegex "\t|  +"
 
 createTable :: SQL.Connection -> String -> IO ()
 createTable conn tname = do
-    let q = "CREATE TABLE "++ tname ++" (id INTEGER PRIMARY KEY)"
+    -- FIXME: suppose one column at least
+    let q = "CREATE TABLE "++ tname ++" (c0 string)"
     SQL.execute_ conn (SQL.Query $ pack q)
 
 addColumn :: SQL.Connection -> String -> String -> IO ()
