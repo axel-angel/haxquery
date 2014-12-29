@@ -62,8 +62,10 @@ fillLines conn tname cols line = do
     forM_ [cols..length fields - 1] $ \i -> do
         addColumn conn tname ("c" ++ show i)
     -- fill the table
+    let colsns = [ "c" ++ show i | i <- [0..length fields - 1] ]
+    let colsstr = intercalate "," colsns
     let vstr = intercalate "," $ map (const "?") fields
-    let q = "INSERT INTO "++ tname ++" VALUES ("++ vstr ++")"
+    let q = "INSERT INTO "++ tname ++" ("++ colsstr ++") VALUES ("++ vstr ++")"
     SQL.execute conn (SQL.Query $ pack q) $ fields
     -- keep track of the number of columns so far
     return $ length fields
