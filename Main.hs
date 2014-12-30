@@ -4,7 +4,7 @@ import Control.Arrow
 import Control.Monad.State
 import System.Environment
 import Language.SQL.SimpleSQL.Syntax
-import Language.SQL.SimpleSQL.Parser (parseQueryExpr)
+import Language.SQL.SimpleSQL.Parser (parseQueryExpr, ParseError(..))
 import Language.SQL.SimpleSQL.Pretty (prettyQueryExpr)
 import qualified Database.SQLite3 as SQL
 import Text.Regex (mkRegex, splitRegex, Regex)
@@ -23,7 +23,9 @@ main = do
     args <- getArgs
     let esql = parseSql (args !! 0)
     case esql of
-         Left e -> putStrLn $ "Error: " ++ show e
+         Left (ParseError _ _ _ err) -> do
+             putStrLn "Error: Cannot parse SQL query"
+             putStrLn err
          Right sql -> do
              conn <- SQL.open ":memory:"
              runQuery sql conn
@@ -170,5 +172,5 @@ registerTable fpath = do
 
 {-- Others/utilities --}
 
-parseSql :: String -> Either String QueryExpr
-parseSql = left show . parseQueryExpr "" Nothing
+parseSql :: String -> Either ParseError QueryExpr
+parseSql = parseQueryExpr "" Nothing
