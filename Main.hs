@@ -1,6 +1,5 @@
 {-# LANGUAGE TupleSections, FlexibleContexts, OverloadedStrings #-}
 import Control.Applicative
-import Control.Arrow
 import Control.Monad.State
 import System.Environment
 import Language.SQL.SimpleSQL.Syntax
@@ -11,7 +10,7 @@ import Text.Regex (mkRegex, splitRegex, Regex)
 import Data.Text (pack, unpack, Text)
 import Data.List (intercalate)
 
-data TableMap = TableMap { stateTs :: [(FilePath,String)], stateI :: Int }
+data TableMap = TableMap { stateTs :: [(FilePath,String)], _stateI :: Int }
     deriving (Show)
 
 emptyTableMap :: TableMap
