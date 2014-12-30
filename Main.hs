@@ -9,6 +9,7 @@ import qualified Database.SQLite3 as SQL
 import Text.Regex (mkRegex, splitRegex, Regex)
 import Data.Text (pack, unpack, Text)
 import Data.List (intercalate)
+import System.Exit (exitWith, ExitCode(..))
 
 data TableMap = TableMap { stateTs :: [(FilePath,String)], _stateI :: Int }
     deriving (Show)
@@ -25,6 +26,7 @@ main = do
          Left (ParseError _ _ _ err) -> do
              putStrLn "Error: Cannot parse SQL query"
              putStrLn err
+             exitWith $ ExitFailure 1
          Right sql -> do
              conn <- SQL.open ":memory:"
              runQuery sql conn
