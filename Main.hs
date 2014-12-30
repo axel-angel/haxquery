@@ -1,4 +1,4 @@
-{-# LANGUAGE TupleSections, FlexibleContexts #-}
+{-# LANGUAGE TupleSections, FlexibleContexts, OverloadedStrings #-}
 import Control.Applicative
 import Control.Arrow
 import Control.Monad.State
@@ -6,7 +6,7 @@ import System.Environment
 import Language.SQL.SimpleSQL.Syntax
 import Language.SQL.SimpleSQL.Parser (parseQueryExpr)
 import Language.SQL.SimpleSQL.Pretty (prettyQueryExpr)
-import qualified Database.SQLite.Simple as SQL
+import qualified Database.SQLite3 as SQL
 import Text.Regex (mkRegex, splitRegex, Regex)
 import Data.Text (pack, unpack, Text)
 import Data.List (intercalate)
@@ -24,11 +24,14 @@ main = do
     let esql = parseSql (args !! 0)
     case esql of
          Left e -> putStrLn $ "Error: " ++ show e
-         Right sql -> SQL.withConnection ":memory:" $ runSql sql
+         Right sql -> do
+             conn <- SQL.open ":memory:"
+             runQuery sql conn
+             SQL.close conn
 
 
-runSql :: QueryExpr -> SQL.Connection -> IO ()
-runSql sql conn = do
+runQuery :: QueryExpr -> SQL.Database -> IO ()
+runQuery sql conn = do
     let tstate = prettyQueryExpr <$> conv sql
     let (expr, tmap) = runState tstate emptyTableMap
 
@@ -37,13 +40,18 @@ runSql sql conn = do
     putStrLn $ "State: " ++ show tmap
     putStrLn $ "SQL: " ++ expr
 
-    rs <- SQL.query_ conn (SQL.Query $ pack expr) :: IO [[String]]
-    forM_ rs $ putStrLn . intercalate "\t"
+    SQL.execWithCallback conn (pack expr) $ \_cols _cns cs -> do
+        putStrLn . intercalate "\t" $ map (unpack . textMaybe) cs
+
+
+textMaybe :: Maybe Text -> Text
+textMaybe (Just x) = x
+textMaybe Nothing = ""
 
 
 {-- Parse files to fill content-equivalent tables --}
 
-loadFiles :: SQL.Connection -> TableMap -> IO ()
+loadFiles :: SQL.Database -> TableMap -> IO ()
 loadFiles conn tmap = forM_ (stateTs tmap) $ \(fpath, tname) -> do
     -- create the table
     createTable conn tname
@@ -54,7 +62,7 @@ loadFiles conn tmap = forM_ (stateTs tmap) $ \(fpath, tname) -> do
     foldM_ (fillLines conn tname) 1 $ lines content
 
 
-fillLines :: SQL.Connection -> String -> Int -> String -> IO Int
+fillLines :: SQL.Database -> String -> Int -> String -> IO Int
 fillLines conn tname cols line = do
     -- split using regex
     let fields = splitRegex rxSplit line
@@ -66,7 +74,7 @@ fillLines conn tname cols line = do
     let colsstr = intercalate "," colsns
     let vstr = intercalate "," $ map (const "?") fields
     let q = "INSERT INTO "++ tname ++" ("++ colsstr ++") VALUES ("++ vstr ++")"
-    SQL.execute conn (SQL.Query $ pack q) $ fields
+    execBind conn (pack q) $ map (SQL.SQLText . pack) fields
     -- keep track of the number of columns so far
     return $ length fields
 
@@ -75,16 +83,25 @@ rxSplit :: Regex
 rxSplit = mkRegex "\t|  +"
 
 
-createTable :: SQL.Connection -> String -> IO ()
+createTable :: SQL.Database -> String -> IO ()
 createTable conn tname = do
     -- FIXME: suppose one column at least
     let q = "CREATE TABLE "++ tname ++" (c0 string)"
-    SQL.execute_ conn (SQL.Query $ pack q)
+    SQL.exec conn $ pack q
 
-addColumn :: SQL.Connection -> String -> String -> IO ()
+addColumn :: SQL.Database -> String -> String -> IO ()
 addColumn conn tname cname = do
     let q = "ALTER TABLE "++ tname ++" ADD COLUMN "++ cname ++" STRING"
-    SQL.execute_ conn (SQL.Query $ pack q)
+    SQL.exec conn $ pack q
+
+execBind :: SQL.Database -> Text -> [SQL.SQLData] -> IO ()
+execBind conn query binds = do
+    sta <- SQL.prepare conn query
+    SQL.bind sta binds
+    _ <- SQL.step sta
+    SQL.finalize sta
+    return ()
+
 
 {-- Find and register file-table in query --}
 
