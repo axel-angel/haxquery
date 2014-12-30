@@ -40,9 +40,6 @@ runQuery sql conn = do
 
     loadFiles conn tmap
 
-    putStrLn $ "State: " ++ show tmap
-    putStrLn $ "SQL: " ++ expr
-
     SQL.execWithCallback conn (pack expr) $ \_cols _cns cs -> do
         putStrLn . intercalate "\t" $ map (unpack . textMaybe) cs
 
