@@ -2,7 +2,6 @@
 import Control.Applicative
 import Control.Monad.State
 import Control.Arrow
-import System.Environment
 import Language.SQL.SimpleSQL.Syntax
 import Language.SQL.SimpleSQL.Parser (parseQueryExpr, ParseError(..))
 import Language.SQL.SimpleSQL.Pretty (prettyQueryExpr)
@@ -12,7 +11,8 @@ import Data.Text (pack, unpack, Text)
 import Data.List (intercalate)
 import System.Exit (exitWith, ExitCode(..))
 import Text.ParserCombinators.Parsec (parse)
-import Data.CSV (csvFile)
+import Data.CSV (csvFile, genCsvFile)
+import Options.Applicative hiding (ParseError)
 
 data TableMap = TableMap { stateTs :: [(FilePath,String)], _stateI :: Int }
     deriving (Show)
@@ -20,31 +20,54 @@ data TableMap = TableMap { stateTs :: [(FilePath,String)], _stateI :: Int }
 emptyTableMap :: TableMap
 emptyTableMap = TableMap [] 0
 
+data Args = Args { argQuery :: QueryExpr, argOut :: Format }
+    deriving (Show)
+
+data Format = TSV | CSV
+    deriving (Show, Enum)
+instance Read Format where
+    readsPrec _ "csv" = [(CSV,"")]
+    readsPrec _ "tsv" = [(TSV,"")]
+    readsPrec _ _ = []
+
 
 main :: IO ()
-main = do
-    args <- getArgs
-    let esql = parseSql (args !! 0)
-    case esql of
-         Left (ParseError _ _ _ err) -> do
-             putStrLn "Error: Cannot parse SQL query"
-             putStrLn err
-             exitWith $ ExitFailure 1
-         Right sql -> do
-             conn <- SQL.open ":memory:"
-             runQuery sql conn
-             SQL.close conn
+main = execParser argParser >>= \args -> do
+    conn <- SQL.open ":memory:"
+    runQuery args conn
+    SQL.close conn
+
+argParser :: ParserInfo Args
+argParser = info (helper <*> opts)
+    ( fullDesc
+    <> progDesc "Execute an SQL query given file-tables"
+    <> header "haxquery" )
 
 
-runQuery :: QueryExpr -> SQL.Database -> IO ()
-runQuery sql conn = do
+opts :: Parser Args
+opts = Args
+    <$> argument (eitherReader parseSql)
+        ( help "SQL query to execute" )
+    <*> option auto
+        ( long "output"
+        <> help "Format used for printing the result"
+        <> value TSV )
+
+
+runQuery :: Args -> SQL.Database -> IO ()
+runQuery (Args sql output) conn = do
     let tstate = prettyQueryExpr <$> conv sql
     let (expr, tmap) = runState tstate emptyTableMap
 
     loadFiles conn tmap
 
+    let writer :: [String] -> IO ()
+        writer = case output of
+            TSV -> putStrLn . intercalate "\t"
+            CSV -> putStr . genCsvFile . (:[])
+
     SQL.execWithCallback conn (pack expr) $ \_cols _cns cs -> do
-        putStrLn . intercalate "\t" $ map (unpack . textMaybe) cs
+        writer . map (unpack . textMaybe) $ cs
 
 
 textMaybe :: Maybe Text -> Text
@@ -184,5 +207,6 @@ registerTable fpath' = do
 
 {-- Others/utilities --}
 
-parseSql :: String -> Either ParseError QueryExpr
-parseSql = parseQueryExpr "" Nothing
+parseSql :: String -> Either String QueryExpr
+parseSql = left showErr . parseQueryExpr "" Nothing
+    where showErr (ParseError _ _ _ err) = show err
