@@ -1,6 +1,7 @@
 {-# LANGUAGE TupleSections, FlexibleContexts, OverloadedStrings #-}
 import Control.Applicative
 import Control.Monad.State
+import Control.Arrow
 import System.Environment
 import Language.SQL.SimpleSQL.Syntax
 import Language.SQL.SimpleSQL.Parser (parseQueryExpr, ParseError(..))
@@ -60,25 +61,24 @@ loadFiles conn tmap = forM_ (stateTs tmap) $ \(fpath, tname) -> do
     -- open file, read line by line
     content <- readFile fpath
     -- detect from extension: csv, etc
-    let reader :: String -> Maybe [[String]]
+    let reader :: String -> Either String [[String]]
         reader = case matchRegex (mkRegex "\\.csv") fpath of
-                      Nothing -> Just . map (splitRegex rxSplit) . lines
-                      Just _ -> csvParse
+                      Nothing -> Right . map (splitRegex rxSplit) . lines
+                      Just _ -> csvParse fpath
     -- fill the table (has already one column!)
     case reader content of
-         Just rows -> foldM_ (fillLines conn tname) 1 rows
-         Nothing -> do
-             putStrLn $ "Error parsing: "++ fpath
+         Right rows -> foldM_ (fillLines conn tname) 1 rows
+         Left err -> do
+             putStrLn $ "Error parsing: "++ err
              exitWith $ ExitFailure 1
 
 
 rxSplit :: Regex
 rxSplit = mkRegex "\t|  +"
 
-csvParse :: String -> Maybe [[String]]
-csvParse content = case parse csvFile "" content of
-                Left _ -> Nothing
-                Right xs -> Just xs
+
+csvParse :: FilePath -> String -> Either String [[String]]
+csvParse fpath content = left (show) $ parse csvFile fpath content
 
 
 fillLines :: SQL.Database -> String -> Int -> [String] -> IO Int
