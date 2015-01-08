@@ -56,7 +56,7 @@ loadFiles conn tmap = forM_ (stateTs tmap) $ \(fpath, tname) -> do
     -- create the table
     createTable conn tname
     -- open file, read line by line
-    content <- readFile fpath
+    content <- readFile (if fpath /= "-" then fpath else "/dev/stdin")
     -- TODO: detect from extension: csv, etc
     -- fill the table (has already one column!)
     foldM_ (fillLines conn tname) 1 $ lines content
