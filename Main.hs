@@ -76,7 +76,7 @@ fillLines conn tname cols line = do
     let q = "INSERT INTO "++ tname ++" ("++ colsstr ++") VALUES ("++ vstr ++")"
     execBind conn (pack q) $ map (SQL.SQLText . pack) fields
     -- keep track of the number of columns so far
-    return $ length fields
+    return $ max cols (length fields)
 
 
 rxSplit :: Regex
