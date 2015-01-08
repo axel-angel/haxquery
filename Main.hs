@@ -6,10 +6,12 @@ import Language.SQL.SimpleSQL.Syntax
 import Language.SQL.SimpleSQL.Parser (parseQueryExpr, ParseError(..))
 import Language.SQL.SimpleSQL.Pretty (prettyQueryExpr)
 import qualified Database.SQLite3 as SQL
-import Text.Regex (mkRegex, splitRegex, Regex)
+import Text.Regex (Regex, mkRegex, splitRegex, matchRegex)
 import Data.Text (pack, unpack, Text)
 import Data.List (intercalate)
 import System.Exit (exitWith, ExitCode(..))
+import Text.ParserCombinators.Parsec (parse)
+import Data.CSV (csvFile)
 
 data TableMap = TableMap { stateTs :: [(FilePath,String)], _stateI :: Int }
     deriving (Show)
@@ -57,15 +59,30 @@ loadFiles conn tmap = forM_ (stateTs tmap) $ \(fpath, tname) -> do
     createTable conn tname
     -- open file, read line by line
     content <- readFile fpath
-    -- TODO: detect from extension: csv, etc
+    -- detect from extension: csv, etc
+    let reader :: String -> Maybe [[String]]
+        reader = case matchRegex (mkRegex "\\.csv") fpath of
+                      Nothing -> Just . map (splitRegex rxSplit) . lines
+                      Just _ -> csvParse
     -- fill the table (has already one column!)
-    foldM_ (fillLines conn tname) 1 $ lines content
+    case reader content of
+         Just rows -> foldM_ (fillLines conn tname) 1 rows
+         Nothing -> do
+             putStrLn $ "Error parsing: "++ fpath
+             exitWith $ ExitFailure 1
 
 
-fillLines :: SQL.Database -> String -> Int -> String -> IO Int
-fillLines conn tname cols line = do
-    -- split using regex
-    let fields = splitRegex rxSplit line
+rxSplit :: Regex
+rxSplit = mkRegex "\t|  +"
+
+csvParse :: String -> Maybe [[String]]
+csvParse content = case parse csvFile "" content of
+                Left _ -> Nothing
+                Right xs -> Just xs
+
+
+fillLines :: SQL.Database -> String -> Int -> [String] -> IO Int
+fillLines conn tname cols fields = do
     -- add more columns when needed
     forM_ [cols..length fields - 1] $ \i -> do
         addColumn conn tname ("c" ++ show i)
@@ -77,10 +94,6 @@ fillLines conn tname cols line = do
     execBind conn (pack q) $ map (SQL.SQLText . pack) fields
     -- keep track of the number of columns so far
     return $ max cols (length fields)
-
-
-rxSplit :: Regex
-rxSplit = mkRegex "\t|  +"
 
 
 createTable :: SQL.Database -> String -> IO ()
