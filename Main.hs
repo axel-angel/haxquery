@@ -56,7 +56,7 @@ loadFiles conn tmap = forM_ (stateTs tmap) $ \(fpath, tname) -> do
     -- create the table
     createTable conn tname
     -- open file, read line by line
-    content <- readFile (if fpath /= "-" then fpath else "/dev/stdin")
+    content <- readFile fpath
     -- TODO: detect from extension: csv, etc
     -- fill the table (has already one column!)
     foldM_ (fillLines conn tname) 1 $ lines content
@@ -157,7 +157,8 @@ convVExpr vexpr = return vexpr
 
 
 registerTable :: MonadState TableMap m => FilePath -> m String
-registerTable fpath = do
+registerTable fpath' = do
+    let fpath = if fpath' /= "-" then fpath' else "/dev/stdin"
     TableMap ts i <- get
     case lookup fpath ts of
          Just tname ->
