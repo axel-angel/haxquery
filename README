@@ -1,0 +1,16 @@
+Haxquery reads your SQL query, fills in-memory tables from the specified files then performs the query using sqlite3. Columns are named c0, c1, … cN.
+
+== Installation and run:
+cabal sandbox init
+cabal build --only-dep -j8
+cabal build
+./dist/build/haxquery/haxquery 'select 1'
+
+== Examples:
+# returns number of processes per user
+$ ps -Fe | haxquery 'select c0, count(*) from "-" group by c0'
+
+# computations on two joined heterogeneous files (CSV + TSV)
+$ haxquery 'select u.c0, avg(i.c0) from "users.csv" u join "infos" i group by u.c0'
+
+Haxquery, copyright Axel Angel 2015.
