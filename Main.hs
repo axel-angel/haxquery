@@ -241,7 +241,10 @@ convVExpr (Case ct cw ce) = do
 convVExpr (Parens vexpr) = Parens <$> convVExpr vexpr
 convVExpr (Cast vexpr tn) = flip Cast tn <$> convVExpr vexpr
 convVExpr (SubQueryExpr tp qexpr) = SubQueryExpr tp <$> conv qexpr
-convVExpr (In b vexpr inp) = (\x -> In b x inp) <$> convVExpr vexpr
+convVExpr (In b vexpr inp) = do
+    vexpr' <- convVExpr vexpr
+    inp' <- convInPredValue inp
+    return $ In b vexpr' inp'
 convVExpr (QuantifiedComparison vexpr ns cpq qexpr) = do
     vexpr' <- convVExpr vexpr
     qexpr' <- conv qexpr
@@ -280,6 +283,10 @@ convSortSpec (SortSpec vexpr dir no) = do
     vexpr' <- convVExpr vexpr
     return $ SortSpec vexpr' dir no
 
+
+convInPredValue :: InPredValue -> State TableMap InPredValue
+convInPredValue (InList vs) = InList <$> forM vs convVExpr
+convInPredValue (InQueryExpr qexpr) = InQueryExpr <$> conv qexpr
 
 registerTable :: MonadState TableMap m => FilePath -> m String
 registerTable fpath' = do
