@@ -13,6 +13,7 @@ import System.Exit (exitWith, ExitCode(..))
 import Text.ParserCombinators.Parsec (parse)
 import Data.CSV (csvFile, genCsvFile)
 import Options.Applicative hiding (ParseError)
+import qualified Data.Traversable as T (sequence)
 
 data TableMap = TableMap { stateTs :: [(FilePath,String)], _stateI :: Int }
     deriving (Show)
@@ -143,22 +144,38 @@ execBind conn query binds = do
 
 conv :: QueryExpr -> State TableMap QueryExpr
 conv sql@(Select _ _ _ _ _ _ _ _ _)  = do
+    qeSelectList' <- forM (qeSelectList sql) $
+        \(vexpr, mname) -> (,mname) <$> convVExpr vexpr
     qeFrom' <- forM (qeFrom sql) convTRef
-    return sql { qeFrom = qeFrom' }
+    qeWhere' <- T.sequence $ convVExpr <$> qeWhere sql
+    qeGroupBy' <- forM (qeGroupBy sql) convGExpr
+    qeHaving' <- T.sequence $ convVExpr <$> qeHaving sql
+    qeOrderBy' <- forM (qeOrderBy sql) convSortSpec
+    qeOffset' <- T.sequence $ convVExpr <$> qeOffset sql
+    qeFetchFirst' <- T.sequence $ convVExpr <$> qeFetchFirst sql
+    return $ sql
+        { qeSelectList = qeSelectList'
+        , qeFrom = qeFrom'
+        , qeWhere = qeWhere'
+        , qeGroupBy = qeGroupBy'
+        , qeHaving = qeHaving'
+        , qeOrderBy = qeOrderBy'
+        , qeOffset = qeOffset'
+        , qeFetchFirst = qeFetchFirst' }
 
 conv sql@(CombineQueryExpr _ _ _ _ _) = do
     qe0' <- conv $ qe0 sql
     qe1' <- conv $ qe1 sql
     return sql { qe0 = qe0', qe1 = qe1' }
 
-conv sql@(With _ _ _) = do
-    qeViews' <- forM (qeViews sql) $ \(al, qe) -> (al,) <$> conv qe
-    qeQueryExpression' <- conv $ qeQueryExpression sql
-    return sql { qeViews = qeViews', qeQueryExpression = qeQueryExpression' }
+conv (With wr vs qe) = do
+    vs' <- forM vs $ \(al, qer) -> (al,) <$> conv qer
+    qe' <- conv qe
+    return $ With wr vs' qe'
 
-conv sql@(Values _) = return sql
+conv (Values vss) = Values <$> (forM vss $ \vs -> forM vs convVExpr)
 
-conv sql@(Table _) = return sql
+conv (Table ns) = Table <$> forM ns convName
 
 
 convTRef :: TableRef -> State TableMap TableRef
@@ -188,8 +205,80 @@ convName sqlName = do
     n <- registerTable name
     return $ Name n
 
-convVExpr :: Monad m => a -> m a
+
+convVExpr :: ValueExpr -> State TableMap ValueExpr
+convVExpr (App ns vs) = App ns <$> forM vs convVExpr
+convVExpr agg@(AggregateApp _ _ _ _ _) = do
+    aggArgs' <- forM (aggArgs agg) convVExpr
+    aggFilter' <- T.sequence $ convVExpr <$> aggFilter agg
+    return $ agg { aggArgs = aggArgs', aggFilter = aggFilter' }
+convVExpr agg@(AggregateAppGroup _ _ _) = do
+    aggArgs' <- forM (aggArgs agg) convVExpr
+    return $ agg { aggArgs = aggArgs' }
+convVExpr win@(WindowApp _ _ _ _ _) = do
+    wnArgs' <- forM (wnArgs win) convVExpr
+    wnPartition' <- forM (wnPartition win) convVExpr
+    return $ win { wnArgs = wnArgs', wnPartition = wnPartition' }
+convVExpr (BinOp vexprl ns vexprr) = do
+    vexprl' <- convVExpr vexprl
+    vexprr' <- convVExpr vexprr
+    return $ BinOp vexprl' ns vexprr'
+convVExpr (PrefixOp ns vexpr) = PrefixOp ns <$> convVExpr vexpr
+convVExpr (PostfixOp ns vexpr) = PostfixOp ns <$> convVExpr vexpr
+convVExpr (SpecialOp ns vexprs) = SpecialOp ns <$> forM vexprs convVExpr
+convVExpr (SpecialOpK ns mvexpr xs) = do
+    mvexpr' <- T.sequence $ convVExpr <$> mvexpr
+    xs' <- forM xs $ \(s, vexpr) -> (s,) <$> convVExpr vexpr
+    return $ SpecialOpK ns mvexpr' xs'
+convVExpr (Case ct cw ce) = do
+    ct' <- T.sequence $ convVExpr <$> ct
+    cw' <- forM cw $ \(vs, vexpr) -> do
+        vs' <- forM vs convVExpr
+        vexpr' <- convVExpr vexpr
+        return (vs', vexpr')
+    ce' <- T.sequence $ convVExpr <$> ce
+    return $ Case ct' cw' ce'
+convVExpr (Parens vexpr) = Parens <$> convVExpr vexpr
+convVExpr (Cast vexpr tn) = flip Cast tn <$> convVExpr vexpr
+convVExpr (SubQueryExpr tp qexpr) = SubQueryExpr tp <$> conv qexpr
+convVExpr (In b vexpr inp) = (\x -> In b x inp) <$> convVExpr vexpr
+convVExpr (QuantifiedComparison vexpr ns cpq qexpr) = do
+    vexpr' <- convVExpr vexpr
+    qexpr' <- conv qexpr
+    return $ QuantifiedComparison vexpr' ns cpq qexpr'
+convVExpr (Match vexpr b qexpr) = do
+    vexpr' <- convVExpr vexpr
+    qexpr' <- conv qexpr
+    return $ Match vexpr' b qexpr'
+convVExpr (Array vexpr vs) = do
+    vexpr' <- convVExpr vexpr
+    vs' <- forM vs convVExpr
+    return $ Array vexpr' vs'
+convVExpr (ArrayCtor qexpr) = ArrayCtor <$> conv qexpr
+convVExpr (Escape vexpr c) = flip Escape c <$> convVExpr vexpr
+convVExpr (UEscape vexpr c) = flip UEscape c <$> convVExpr vexpr
+convVExpr (Collate vexpr ns) = flip Collate ns <$> convVExpr vexpr
+convVExpr (MultisetBinOp vexprl co sq vexprr) = do
+    vexprl' <- convVExpr vexprl
+    vexprr' <- convVExpr vexprr
+    return $ MultisetBinOp vexprl' co sq vexprr'
+convVExpr (MultisetCtor vs) = MultisetCtor <$> forM vs convVExpr
+convVExpr (MultisetQueryCtor qs) = MultisetQueryCtor <$> conv qs
 convVExpr vexpr = return vexpr
+
+
+convGExpr :: GroupingExpr -> State TableMap GroupingExpr
+convGExpr (GroupingParens gs) = GroupingParens <$> forM gs convGExpr
+convGExpr (Cube gs) = Cube <$> forM gs convGExpr
+convGExpr (Rollup gs) = Rollup <$> forM gs convGExpr
+convGExpr (GroupingSets gs) = GroupingSets <$> forM gs convGExpr
+convGExpr (SimpleGroup vexpr) = SimpleGroup <$> convVExpr vexpr
+
+
+convSortSpec :: SortSpec -> State TableMap SortSpec
+convSortSpec (SortSpec vexpr dir no) = do
+    vexpr' <- convVExpr vexpr
+    return $ SortSpec vexpr' dir no
 
 
 registerTable :: MonadState TableMap m => FilePath -> m String
